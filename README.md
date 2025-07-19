@@ -3,7 +3,7 @@
 A modern web application built with Next.js that allows users to upload, manage, and compare satellite images using Azure Cognitive Services for advanced image analysis and change detection.
 
 ## Live Demo
-🚀 Deployed on Azure Static Web Apps
+🚀 Deployed on Azure Static Web Apps - Ready for deployment!
 
 ## Features
 
