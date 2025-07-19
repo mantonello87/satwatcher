@@ -164,7 +164,7 @@ export default function ImageLibrary({
           </div>
           {selectedImages.length === 2 && (
             <p className="text-sm text-blue-700 mt-3">
-              Ready to compare! Switch to the "Compare Images" tab to analyze differences.
+              Ready to compare! Switch to the &quot;Compare Images&quot; tab to analyze differences.
             </p>
           )}
         </div>
