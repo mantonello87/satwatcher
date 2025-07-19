@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import LoginForm from '@/components/LoginForm'
+import LoginFormWrapper from '@/components/LoginFormWrapper'
 
 export default function Home() {
   return (
@@ -28,7 +28,7 @@ export default function Home() {
         </div>
         
         <div className="max-w-md mx-auto">
-          <LoginForm />
+          <LoginFormWrapper />
         </div>
         
         <div className="text-center mt-8">
