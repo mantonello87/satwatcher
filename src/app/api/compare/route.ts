@@ -60,7 +60,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(comparisonResult)
   } catch (error) {
     console.error('Custom Vision comparison error:', error)
-    return NextResponse.json({ error: 'Comparison failed' }, { status: 500 })
+    
+    // Provide more detailed error information
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+    const errorDetails = {
+      message: errorMessage,
+      timestamp: new Date().toISOString(),
+      environment: {
+        hasCustomVisionKey: !!CUSTOM_VISION_PREDICTION_KEY,
+        endpoint: CUSTOM_VISION_ENDPOINT,
+        projectId: CUSTOM_VISION_PROJECT_ID,
+        publishedName: CUSTOM_VISION_PUBLISHED_NAME
+      }
+    }
+    
+    return NextResponse.json({ 
+      error: 'Comparison failed', 
+      details: errorDetails 
+    }, { status: 500 })
   }
 }
 
@@ -68,10 +85,12 @@ export async function POST(request: NextRequest) {
 async function callCustomVisionAPI(imageUrl: string) {
   // Ensure endpoint has trailing slash
   const endpoint = CUSTOM_VISION_ENDPOINT.endsWith('/') ? CUSTOM_VISION_ENDPOINT : `${CUSTOM_VISION_ENDPOINT}/`
-  const customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
+  
+  // Try classification first, then detection if that fails
+  let customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/classify/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
   
   try {
-    console.log('Calling Custom Vision API:', customVisionUrl)
+    console.log('Calling Custom Vision API (Classification):', customVisionUrl)
     console.log('Image URL:', imageUrl)
     console.log('Using prediction key:', CUSTOM_VISION_PREDICTION_KEY ? 'Present' : 'Missing')
     
@@ -81,10 +100,16 @@ async function callCustomVisionAPI(imageUrl: string) {
         'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ Url: imageUrl }) // Note: Capital 'U' in Url as per Azure API spec
+      body: JSON.stringify({ Url: imageUrl })
     })
 
     if (!response.ok) {
+      // If classification fails, try detection
+      if (response.status === 404) {
+        console.log('Classification endpoint not found, trying detection...')
+        return await callCustomVisionDetectionAPI(imageUrl)
+      }
+      
       const errorText = await response.text()
       console.error('Custom Vision API Error:', response.status, response.statusText, errorText)
       throw new Error(`Custom Vision API error: ${response.status} ${response.statusText} - ${errorText}`)
@@ -94,24 +119,61 @@ async function callCustomVisionAPI(imageUrl: string) {
     console.log('Custom Vision API Response:', result)
     return result
   } catch (error) {
-    console.error('Custom Vision API call failed:', error)
+    console.error('Custom Vision classification API call failed:', error)
     
-    // If URL method fails, try fetching the image and sending as binary data
+    // Try detection as fallback
     try {
-      console.log('Trying binary upload method...')
-      return await callCustomVisionAPIWithBinary(imageUrl)
-    } catch (binaryError) {
-      console.error('Binary upload also failed:', binaryError)
-      throw error // Throw original error
+      console.log('Trying detection API as fallback...')
+      return await callCustomVisionDetectionAPI(imageUrl)
+    } catch (detectionError) {
+      console.error('Detection API also failed:', detectionError)
+      
+      // Final fallback: try binary upload
+      try {
+        console.log('Trying binary upload method...')
+        return await callCustomVisionAPIWithBinary(imageUrl)
+      } catch (binaryError) {
+        console.error('Binary upload also failed:', binaryError)
+        throw error // Throw original error
+      }
     }
   }
+}
+
+// Detection API call
+async function callCustomVisionDetectionAPI(imageUrl: string) {
+  const endpoint = CUSTOM_VISION_ENDPOINT.endsWith('/') ? CUSTOM_VISION_ENDPOINT : `${CUSTOM_VISION_ENDPOINT}/`
+  const customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
+  
+  console.log('Calling Custom Vision API (Detection):', customVisionUrl)
+  
+  const response = await fetch(customVisionUrl, {
+    method: 'POST',
+    headers: {
+      'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ Url: imageUrl })
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('Custom Vision Detection API Error:', response.status, response.statusText, errorText)
+    throw new Error(`Custom Vision Detection API error: ${response.status} ${response.statusText} - ${errorText}`)
+  }
+
+  const result = await response.json()
+  console.log('Custom Vision Detection API Response:', result)
+  return result
 }
 
 // Alternative method: Download image and send as binary data
 async function callCustomVisionAPIWithBinary(imageUrl: string) {
   // Ensure endpoint has trailing slash
   const endpoint = CUSTOM_VISION_ENDPOINT.endsWith('/') ? CUSTOM_VISION_ENDPOINT : `${CUSTOM_VISION_ENDPOINT}/`
-  const customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/image`
+  
+  // Try classification first
+  let customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/classify/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/image`
   
   // Fetch the image
   const imageResponse = await fetch(imageUrl)
@@ -121,22 +183,52 @@ async function callCustomVisionAPIWithBinary(imageUrl: string) {
   
   const imageBuffer = await imageResponse.arrayBuffer()
   
-  const response = await fetch(customVisionUrl, {
-    method: 'POST',
-    headers: {
-      'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
-      'Content-Type': 'application/octet-stream'
-    },
-    body: imageBuffer
-  })
+  try {
+    console.log('Trying binary classification upload:', customVisionUrl)
+    
+    const response = await fetch(customVisionUrl, {
+      method: 'POST',
+      headers: {
+        'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
+        'Content-Type': 'application/octet-stream'
+      },
+      body: imageBuffer
+    })
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error('Custom Vision Binary API Error:', response.status, response.statusText, errorText)
-    throw new Error(`Custom Vision API error: ${response.status} ${response.statusText} - ${errorText}`)
+    if (!response.ok) {
+      // If classification fails, try detection
+      if (response.status === 404) {
+        console.log('Binary classification endpoint not found, trying detection...')
+        customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/image`
+        
+        const detectionResponse = await fetch(customVisionUrl, {
+          method: 'POST',
+          headers: {
+            'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
+            'Content-Type': 'application/octet-stream'
+          },
+          body: imageBuffer
+        })
+        
+        if (!detectionResponse.ok) {
+          const errorText = await detectionResponse.text()
+          console.error('Custom Vision Binary Detection API Error:', detectionResponse.status, detectionResponse.statusText, errorText)
+          throw new Error(`Custom Vision Binary Detection API error: ${detectionResponse.status} ${detectionResponse.statusText}`)
+        }
+        
+        return await detectionResponse.json()
+      }
+      
+      const errorText = await response.text()
+      console.error('Custom Vision Binary API Error:', response.status, response.statusText, errorText)
+      throw new Error(`Custom Vision Binary API error: ${response.status} ${response.statusText} - ${errorText}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Binary Custom Vision API call failed:', error)
+    throw error
   }
-
-  return await response.json()
 }
 
 // Mock Custom Vision analysis for demo
