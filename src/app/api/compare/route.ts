@@ -21,8 +21,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Two images are required' }, { status: 400 })
     }
 
+    console.log('Environment check:', {
+      hasCustomVisionKey: !!CUSTOM_VISION_PREDICTION_KEY && CUSTOM_VISION_PREDICTION_KEY !== 'your-custom-vision-prediction-key',
+      endpoint: CUSTOM_VISION_ENDPOINT,
+      projectId: CUSTOM_VISION_PROJECT_ID,
+      publishedName: CUSTOM_VISION_PUBLISHED_NAME
+    })
+
     // Check if Custom Vision is configured
-    if (CUSTOM_VISION_PREDICTION_KEY === 'your-custom-vision-prediction-key') {
+    if (!CUSTOM_VISION_PREDICTION_KEY || CUSTOM_VISION_PREDICTION_KEY === 'your-custom-vision-prediction-key') {
+      console.log('Custom Vision not configured, using mock analysis')
       // Fallback to mock analysis
       const mockResult = await simulateCustomVisionComparison(image1, image2)
       return NextResponse.json(mockResult)
@@ -32,6 +40,8 @@ export async function POST(request: NextRequest) {
     const baseUrl = request.nextUrl.origin
     const fullImage1Url = image1.startsWith('http') ? image1 : `${baseUrl}${image1}`
     const fullImage2Url = image2.startsWith('http') ? image2 : `${baseUrl}${image2}`
+
+    console.log('Processing images:', { fullImage1Url, fullImage2Url })
 
     // Use direct HTTP calls to Custom Vision API
     const [prediction1, prediction2] = await Promise.all([
@@ -56,11 +66,14 @@ export async function POST(request: NextRequest) {
 
 // Direct HTTP call to Custom Vision API matching portal specifications
 async function callCustomVisionAPI(imageUrl: string) {
-  const customVisionUrl = `${CUSTOM_VISION_ENDPOINT}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
+  // Ensure endpoint has trailing slash
+  const endpoint = CUSTOM_VISION_ENDPOINT.endsWith('/') ? CUSTOM_VISION_ENDPOINT : `${CUSTOM_VISION_ENDPOINT}/`
+  const customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
   
   try {
     console.log('Calling Custom Vision API:', customVisionUrl)
     console.log('Image URL:', imageUrl)
+    console.log('Using prediction key:', CUSTOM_VISION_PREDICTION_KEY ? 'Present' : 'Missing')
     
     const response = await fetch(customVisionUrl, {
       method: 'POST',
@@ -96,7 +109,9 @@ async function callCustomVisionAPI(imageUrl: string) {
 
 // Alternative method: Download image and send as binary data
 async function callCustomVisionAPIWithBinary(imageUrl: string) {
-  const customVisionUrl = `${CUSTOM_VISION_ENDPOINT}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/image`
+  // Ensure endpoint has trailing slash
+  const endpoint = CUSTOM_VISION_ENDPOINT.endsWith('/') ? CUSTOM_VISION_ENDPOINT : `${CUSTOM_VISION_ENDPOINT}/`
+  const customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/detect/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/image`
   
   // Fetch the image
   const imageResponse = await fetch(imageUrl)
