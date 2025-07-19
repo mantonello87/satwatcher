@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Use standalone output for Azure Static Web Apps
-  output: 'standalone',
+  // Use default output for Azure Static Web Apps
   trailingSlash: true,
   images: {
     unoptimized: true,
