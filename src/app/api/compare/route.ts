@@ -81,52 +81,47 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Direct HTTP call to Custom Vision API matching portal specifications
+// Direct HTTP call to Custom Vision API optimized for detection model
 async function callCustomVisionAPI(imageUrl: string) {
   // Ensure endpoint has trailing slash
   const endpoint = CUSTOM_VISION_ENDPOINT.endsWith('/') ? CUSTOM_VISION_ENDPOINT : `${CUSTOM_VISION_ENDPOINT}/`
   
-  // Try classification first, then detection if that fails
-  let customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/classify/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
-  
+  // Try detection first since we know this is a detection model
   try {
-    console.log('Calling Custom Vision API (Classification):', customVisionUrl)
-    console.log('Image URL:', imageUrl)
-    console.log('Using prediction key:', CUSTOM_VISION_PREDICTION_KEY ? 'Present' : 'Missing')
-    
-    const response = await fetch(customVisionUrl, {
-      method: 'POST',
-      headers: {
-        'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ Url: imageUrl })
-    })
-
-    if (!response.ok) {
-      // If classification fails, try detection
-      if (response.status === 404) {
-        console.log('Classification endpoint not found, trying detection...')
-        return await callCustomVisionDetectionAPI(imageUrl)
-      }
-      
-      const errorText = await response.text()
-      console.error('Custom Vision API Error:', response.status, response.statusText, errorText)
-      throw new Error(`Custom Vision API error: ${response.status} ${response.statusText} - ${errorText}`)
-    }
-
-    const result = await response.json()
-    console.log('Custom Vision API Response:', result)
-    return result
+    console.log('Calling Custom Vision API (Detection - Primary)...')
+    return await callCustomVisionDetectionAPI(imageUrl)
   } catch (error) {
-    console.error('Custom Vision classification API call failed:', error)
+    console.error('Custom Vision detection API call failed:', error)
     
-    // Try detection as fallback
+    // Try classification as fallback (though we know this will fail)
     try {
-      console.log('Trying detection API as fallback...')
-      return await callCustomVisionDetectionAPI(imageUrl)
-    } catch (detectionError) {
-      console.error('Detection API also failed:', detectionError)
+      console.log('Trying classification API as fallback...')
+      const customVisionUrl = `${endpoint}customvision/v3.0/Prediction/${CUSTOM_VISION_PROJECT_ID}/classify/iterations/${CUSTOM_VISION_PUBLISHED_NAME}/url`
+      
+      console.log('Calling Custom Vision API (Classification):', customVisionUrl)
+      console.log('Image URL:', imageUrl)
+      console.log('Using prediction key:', CUSTOM_VISION_PREDICTION_KEY ? 'Present' : 'Missing')
+      
+      const response = await fetch(customVisionUrl, {
+        method: 'POST',
+        headers: {
+          'Prediction-Key': CUSTOM_VISION_PREDICTION_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ Url: imageUrl })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Custom Vision Classification Error:', response.status, response.statusText, errorText)
+        throw new Error(`Custom Vision API error: ${response.status} ${response.statusText} - ${errorText}`)
+      }
+
+      const result = await response.json()
+      console.log('Custom Vision Classification Response:', result)
+      return result
+    } catch (classificationError) {
+      console.error('Classification API also failed:', classificationError)
       
       // Final fallback: try binary upload
       try {
@@ -134,7 +129,7 @@ async function callCustomVisionAPI(imageUrl: string) {
         return await callCustomVisionAPIWithBinary(imageUrl)
       } catch (binaryError) {
         console.error('Binary upload also failed:', binaryError)
-        throw error // Throw original error
+        throw error // Throw original detection error
       }
     }
   }
