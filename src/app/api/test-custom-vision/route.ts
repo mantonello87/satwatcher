@@ -8,7 +8,14 @@ export async function GET() {
       endpoint: process.env.AZURE_CUSTOM_VISION_ENDPOINT,
       projectId: process.env.AZURE_CUSTOM_VISION_PROJECT_ID,
       publishedName: process.env.AZURE_CUSTOM_VISION_PUBLISHED_NAME,
-      keyLength: process.env.AZURE_CUSTOM_VISION_PREDICTION_KEY?.length || 0
+      keyLength: process.env.AZURE_CUSTOM_VISION_PREDICTION_KEY?.length || 0,
+      // Debug: show all Custom Vision related env vars
+      allCustomVisionEnvVars: Object.keys(process.env)
+        .filter(key => key.includes('CUSTOM_VISION') || key.includes('AZURE'))
+        .reduce((obj, key) => {
+          obj[key] = key.includes('KEY') ? 'HIDDEN' : (process.env[key] || 'undefined')
+          return obj
+        }, {} as Record<string, string>)
     }
 
     console.log('Custom Vision Config Test:', config)
