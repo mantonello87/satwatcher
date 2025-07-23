@@ -290,7 +290,7 @@ async function simulateCustomVisionComparison(image1: string, image2: string) {
   }
 }
 
-// Compare Custom Vision prediction results
+// Compare Custom Vision prediction results with enhanced spatial analysis
 async function compareCustomVisionResults(
   prediction1: any, 
   prediction2: any, 
@@ -304,104 +304,196 @@ async function compareCustomVisionResults(
   const predictions1 = prediction1.predictions || []
   const predictions2 = prediction2.predictions || []
 
-  console.log('Custom Vision Results:', { predictions1, predictions2 })
-
-  // Create maps for easier comparison
-  const objectMap1 = new Map<string, any>()
-  const objectMap2 = new Map<string, any>()
-
-  predictions1.forEach((pred: any) => {
-    const key = `${pred.tagName}`
-    objectMap1.set(key, pred)
+  console.log('Custom Vision Results:', { 
+    image1_predictions: predictions1.length,
+    image2_predictions: predictions2.length,
+    predictions1, 
+    predictions2 
   })
 
-  predictions2.forEach((pred: any) => {
-    const key = `${pred.tagName}`
-    objectMap2.set(key, pred)
+  // Filter predictions by confidence threshold (>= 10% to catch more detections)
+  const filteredPreds1 = predictions1.filter((pred: any) => pred.probability >= 0.1)
+  const filteredPreds2 = predictions2.filter((pred: any) => pred.probability >= 0.1)
+
+  // Count detections by tag
+  const counts1 = new Map<string, number>()
+  const counts2 = new Map<string, number>()
+  const highConfPreds1 = new Map<string, any[]>()
+  const highConfPreds2 = new Map<string, any[]>()
+
+  filteredPreds1.forEach((pred: any) => {
+    counts1.set(pred.tagName, (counts1.get(pred.tagName) || 0) + 1)
+    if (!highConfPreds1.has(pred.tagName)) highConfPreds1.set(pred.tagName, [])
+    highConfPreds1.get(pred.tagName)!.push(pred)
+  })
+
+  filteredPreds2.forEach((pred: any) => {
+    counts2.set(pred.tagName, (counts2.get(pred.tagName) || 0) + 1)
+    if (!highConfPreds2.has(pred.tagName)) highConfPreds2.set(pred.tagName, [])
+    highConfPreds2.get(pred.tagName)!.push(pred)
   })
 
   // Find all unique tags
   const allTags = new Set<string>([
-    ...Array.from(objectMap1.keys()), 
-    ...Array.from(objectMap2.keys())
+    ...Array.from(counts1.keys()), 
+    ...Array.from(counts2.keys())
   ])
 
-  // Compare object detections
-  allTags.forEach(tag => {
-    const obj1 = objectMap1.get(tag)
-    const obj2 = objectMap2.get(tag)
+  console.log('Detection counts:', { 
+    image1: Object.fromEntries(counts1), 
+    image2: Object.fromEntries(counts2) 
+  })
 
-    if (obj1 && obj2) {
-      // Object exists in both images - check for changes
-      const probabilityDiff = Math.abs(obj2.probability - obj1.probability)
+  // Compare detection counts and confidence levels
+  allTags.forEach(tag => {
+    const count1 = counts1.get(tag) || 0
+    const count2 = counts2.get(tag) || 0
+    const preds1 = highConfPreds1.get(tag) || []
+    const preds2 = highConfPreds2.get(tag) || []
+
+    // Calculate average confidence for each tag
+    const avgConf1 = preds1.length > 0 ? preds1.reduce((sum, p) => sum + p.probability, 0) / preds1.length : 0
+    const avgConf2 = preds2.length > 0 ? preds2.reduce((sum, p) => sum + p.probability, 0) / preds2.length : 0
+
+    // Check for count differences
+    const countDiff = Math.abs(count2 - count1)
+    if (countDiff > 0) {
+      const changeType = count2 > count1 ? 'Increase' : 'Decrease'
+      const severity = countDiff >= 3 ? 'High' : countDiff >= 2 ? 'Medium' : 'Low'
       
-      if (probabilityDiff > 0.2) { // 20% threshold for significant change
-        const changeType = obj2.probability > obj1.probability ? 'Increase' : 'Decrease'
-        const severity = probabilityDiff > 0.5 ? 'Critical' : probabilityDiff > 0.3 ? 'High' : 'Medium'
+      differences.push({
+        id: `count-${tag}-${Date.now()}`,
+        description: `${changeType} in ${tag} detections: ${count1} → ${count2} (${countDiff > 0 ? '+' : ''}${count2 - count1})`,
+        confidence: Math.max(avgConf1, avgConf2),
+        category: categorizePrediction(tag),
+        changeType: changeType,
+        severity: severity,
+        location: preds2.length > 0 && preds2[0].boundingBox ? {
+          x: Math.round(preds2[0].boundingBox.left * 400),
+          y: Math.round(preds2[0].boundingBox.top * 300)
+        } : undefined,
+        details: {
+          image1Count: count1,
+          image2Count: count2,
+          avgConfidence1: avgConf1,
+          avgConfidence2: avgConf2
+        }
+      })
+    }
+
+    // Check for confidence changes (lowered threshold to 10%)
+    if (count1 > 0 && count2 > 0) {
+      const confidenceDiff = Math.abs(avgConf2 - avgConf1)
+      if (confidenceDiff > 0.1) { // 10% threshold for confidence changes
+        const changeType = avgConf2 > avgConf1 ? 'Increase' : 'Decrease'
+        const severity = confidenceDiff > 0.3 ? 'High' : confidenceDiff > 0.2 ? 'Medium' : 'Low'
         
         differences.push({
-          id: `change-${tag}-${Date.now()}`,
-          description: `${changeType} in ${tag} detection confidence: ${(probabilityDiff * 100).toFixed(1)}% change`,
-          confidence: Math.max(obj1.probability, obj2.probability),
+          id: `confidence-${tag}-${Date.now()}`,
+          description: `${changeType} in ${tag} detection confidence: ${(confidenceDiff * 100).toFixed(1)}% change`,
+          confidence: Math.max(avgConf1, avgConf2),
           category: categorizePrediction(tag),
-          changeType: changeType,
+          changeType: `Confidence ${changeType}`,
           severity: severity,
-          location: obj2.boundingBox ? {
-            x: Math.round(obj2.boundingBox.left * 400),
-            y: Math.round(obj2.boundingBox.top * 300)
-          } : undefined
-        })
-      }
-    } else if (obj2 && !obj1) {
-      // New object detected in image 2
-      if (obj2.probability > 0.5) {
-        differences.push({
-          id: `new-${tag}-${Date.now()}`,
-          description: `New ${tag} detected`,
-          confidence: obj2.probability,
-          category: categorizePrediction(tag),
-          changeType: 'Addition',
-          severity: obj2.probability > 0.8 ? 'High' : 'Medium',
-          location: obj2.boundingBox ? {
-            x: Math.round(obj2.boundingBox.left * 400),
-            y: Math.round(obj2.boundingBox.top * 300)
-          } : undefined
-        })
-      }
-    } else if (obj1 && !obj2) {
-      // Object removed from image 1 to image 2
-      if (obj1.probability > 0.5) {
-        differences.push({
-          id: `removed-${tag}-${Date.now()}`,
-          description: `${tag} no longer detected`,
-          confidence: obj1.probability,
-          category: categorizePrediction(tag),
-          changeType: 'Removal',
-          severity: obj1.probability > 0.8 ? 'High' : 'Medium',
-          location: obj1.boundingBox ? {
-            x: Math.round(obj1.boundingBox.left * 400),
-            y: Math.round(obj1.boundingBox.top * 300)
-          } : undefined
+          location: preds2.length > 0 && preds2[0].boundingBox ? {
+            x: Math.round(preds2[0].boundingBox.left * 400),
+            y: Math.round(preds2[0].boundingBox.top * 300)
+          } : undefined,
+          details: {
+            avgConfidence1: avgConf1,
+            avgConfidence2: avgConf2,
+            confidenceChange: confidenceDiff
+          }
         })
       }
     }
   })
 
-  // Calculate overall change percentage
-  changePercentage = Math.min(differences.length * 0.1, 1) // 10% per significant difference, capped at 100%
+  // Add spatial distribution analysis
+  const spatialAnalysis = analyzeSpatialDistribution(filteredPreds1, filteredPreds2)
+  if (spatialAnalysis.hasSignificantChange) {
+    differences.push({
+      id: `spatial-change-${Date.now()}`,
+      description: spatialAnalysis.description,
+      confidence: spatialAnalysis.confidence,
+      category: 'Spatial Distribution',
+      changeType: 'Spatial Shift',
+      severity: spatialAnalysis.severity,
+      details: spatialAnalysis.details
+    })
+  }
+
+  // Calculate overall change percentage based on multiple factors
+  const totalPreds1 = filteredPreds1.length
+  const totalPreds2 = filteredPreds2.length
+  const countChangeRatio = totalPreds1 > 0 ? Math.abs(totalPreds2 - totalPreds1) / totalPreds1 : (totalPreds2 > 0 ? 1 : 0)
+  const significanceScore = differences.length * 0.15 // 15% per significant difference
+  changePercentage = Math.min(Math.max(countChangeRatio, significanceScore), 1)
 
   const averageConfidence = differences.length > 0 
     ? differences.reduce((sum, diff) => sum + diff.confidence, 0) / differences.length 
     : 0
 
+  const summary = differences.length > 0 
+    ? `Custom Vision detected ${differences.length} significant changes between the images. Found ${totalPreds1} detections in image 1 vs ${totalPreds2} in image 2.`
+    : `Custom Vision found ${totalPreds1} detections in image 1 and ${totalPreds2} in image 2, but no significant differences were detected.`
+
   return {
     differences,
-    summary: `Custom Vision model detected ${differences.length} significant changes between the satellite images using your trained object detection model.`,
+    summary,
     changePercentage,
-    analysisMethod: 'Custom Vision Object Detection',
+    analysisMethod: 'Enhanced Custom Vision Object Detection',
     modelConfidence: averageConfidence,
-    totalRegionsAnalyzed: Math.max(predictions1.length, predictions2.length),
-    changedRegions: differences.length
+    totalRegionsAnalyzed: Math.max(totalPreds1, totalPreds2),
+    changedRegions: differences.length,
+    detectionCounts: {
+      image1: totalPreds1,
+      image2: totalPreds2,
+      byTag1: Object.fromEntries(counts1),
+      byTag2: Object.fromEntries(counts2)
+    }
+  }
+}
+
+// Analyze spatial distribution of detections
+function analyzeSpatialDistribution(preds1: any[], preds2: any[]) {
+  // Calculate center of mass for each image
+  const getCenterOfMass = (predictions: any[]) => {
+    if (predictions.length === 0) return { x: 0, y: 0 }
+    
+    const validPreds = predictions.filter(p => p.boundingBox)
+    if (validPreds.length === 0) return { x: 0, y: 0 }
+    
+    const totalX = validPreds.reduce((sum, p) => sum + (p.boundingBox.left + p.boundingBox.width / 2), 0)
+    const totalY = validPreds.reduce((sum, p) => sum + (p.boundingBox.top + p.boundingBox.height / 2), 0)
+    
+    return {
+      x: totalX / validPreds.length,
+      y: totalY / validPreds.length
+    }
+  }
+
+  const center1 = getCenterOfMass(preds1)
+  const center2 = getCenterOfMass(preds2)
+  
+  const spatialShift = Math.sqrt(
+    Math.pow(center2.x - center1.x, 2) + Math.pow(center2.y - center1.y, 2)
+  )
+  
+  const hasSignificantChange = spatialShift > 0.1 // 10% shift threshold
+  
+  return {
+    hasSignificantChange,
+    description: hasSignificantChange 
+      ? `Spatial distribution shift detected: ${(spatialShift * 100).toFixed(1)}% change in detection center`
+      : 'No significant spatial distribution change',
+    confidence: Math.min(spatialShift * 2, 1), // Scale to 0-1
+    severity: spatialShift > 0.3 ? 'High' : spatialShift > 0.2 ? 'Medium' : 'Low',
+    details: {
+      spatialShift,
+      center1,
+      center2
+    }
   }
 }
 
@@ -419,6 +511,7 @@ function categorizePrediction(tagName: string): string {
     'residential': 'Urban Development',
     'commercial': 'Urban Development',
     'deforestation': 'Environmental Change',
+    'deforest': 'Environmental Change',
     'construction': 'Infrastructure Development'
   }
   

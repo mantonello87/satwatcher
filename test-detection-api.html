@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom Vision Detection Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .results { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e9; color: #2e7d32; }
+        button { background: #0066cc; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0052a3; }
+    </style>
+</head>
+<body>
+    <h1>SatWatcher Custom Vision Detection Test</h1>
+    <p>This page tests the optimized Custom Vision API that now prioritizes detection calls.</p>
+    
+    <button onclick="testDetectionAPI()">Test Detection API</button>
+    <button onclick="testCompareAPI()">Test Compare API</button>
+    
+    <div id="results"></div>
+
+    <script>
+        async function testDetectionAPI() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="results">Testing Custom Vision Detection API...</div>';
+            
+            try {
+                const response = await fetch('/api/test-custom-vision');
+                const data = await response.json();
+                
+                if (data.success && data.results.detect.success) {
+                    resultsDiv.innerHTML = `
+                        <div class="results success">
+                            <h3>✅ Detection API Working!</h3>
+                            <p><strong>Detections Found:</strong> ${data.results.detect.result.predictions.length}</p>
+                            <p><strong>Primary Detection:</strong> ${data.results.detect.result.predictions[0]?.tagName} (${(data.results.detect.result.predictions[0]?.probability * 100).toFixed(1)}% confidence)</p>
+                            <p><strong>Classification Status:</strong> ${data.results.classify.success ? 'Working' : 'Failed (Expected for detection model)'}</p>
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="results error">
+                            <h3>❌ Detection API Failed</h3>
+                            <p>Error: ${data.results?.detect?.error || 'Unknown error'}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="results error">
+                        <h3>❌ Test Failed</h3>
+                        <p>Error: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function testCompareAPI() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="results">Testing Compare API with optimized detection...</div>';
+            
+            try {
+                const response = await fetch('/api/compare', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image1: 'https://images.unsplash.com/photo-1446776653964-20c1d3a81b06?w=400',
+                        image2: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=400'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.differences) {
+                    resultsDiv.innerHTML = `
+                        <div class="results success">
+                            <h3>✅ Compare API Working!</h3>
+                            <p><strong>Analysis Method:</strong> ${data.analysisMethod}</p>
+                            <p><strong>Changes Detected:</strong> ${data.differences.length}</p>
+                            <p><strong>Change Percentage:</strong> ${(data.changePercentage * 100).toFixed(1)}%</p>
+                            <p><strong>Model Confidence:</strong> ${(data.modelConfidence * 100).toFixed(1)}%</p>
+                            <p><strong>Summary:</strong> ${data.summary}</p>
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="results error">
+                            <h3>❌ Compare API Failed</h3>
+                            <p>Error: ${data.error || 'Unknown error'}</p>
+                            <p>Details: ${JSON.stringify(data.details || {}, null, 2)}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="results error">
+                        <h3>❌ Test Failed</h3>
+                        <p>Error: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
